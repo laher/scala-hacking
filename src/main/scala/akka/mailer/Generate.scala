@@ -19,8 +19,8 @@ object Generate extends App {
   case class EmailData(value: String) extends PiMessage
   case class Email(text: String, duration: Duration)
 
-  class PullData extends Actor {
-	var onward : Option[ActorRef]= None
+  class PullData(onward : ActorRef) extends Actor {
+	//var onward : Option[ActorRef]= None
     def genRandomEmail(): String = {
       var str= "blah blah"
       str
@@ -30,17 +30,17 @@ object Generate extends App {
       
       case Work(start, nrOfElements) =>
         println("pullData received Work")
-        val t= context.actorFor("akka://EmailSystem/user/master/applyTemplate")
-        println(t.getClass())
-        println(t.path)
-        t ! EmailData(genRandomEmail()) // perform the work
+      //  val t= context.actorFor("akka://EmailSystem/user/master/applyTemplate")
+      //  println(t.getClass())
+      //  println(t.path)
+        onward ! EmailData(genRandomEmail()) // perform the work
       case _ =>
         println("pullData received unexpected input")
     }
   }
   
   class ApplyTemplate extends Actor {
-	var onward : Option[ActorRef]= None
+	//var onward : Option[ActorRef]= None
     
     def applyTemplate(data : String, template : String) : String = {
       return null
@@ -52,6 +52,7 @@ object Generate extends App {
       case EmailData(text) =>
         println("ApplyTemplate received EmailData")
         println(text)
+        
         /*
         onward match {
           case Some(x) => x ! EmailData(genRandomEmail()) // perform the work
@@ -78,7 +79,7 @@ object Generate extends App {
     val myApplyRouter = context.actorOf(Props[ApplyTemplate].withRouter(RoundRobinRouter(nrOfWorkers)), name = "applyTemplate")
     println(myApplyRouter.path)
     val workerRouter = context.actorOf(
-      Props[PullData].withRouter(RoundRobinRouter(nrOfWorkers)), name = "workerRouter")
+       Props(new PullData(myApplyRouter)).withRouter(RoundRobinRouter(nrOfWorkers)), name = "workerRouter")
  
     def receive = {
       case Calculate =>
