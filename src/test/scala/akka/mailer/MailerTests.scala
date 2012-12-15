@@ -13,11 +13,14 @@ import akka.Pi
 @RunWith(classOf[JUnitRunner])
 class MailerTests extends WordSpec with MustMatchers with BeforeAndAfterAll {
 
+  /*
   implicit val system = ActorSystem()
 
   override def afterAll {
     system.shutdown()
   }
+  * 
+  */
 
   "GetData" must {
     "get some email data" in {

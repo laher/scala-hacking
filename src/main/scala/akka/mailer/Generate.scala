@@ -1,14 +1,17 @@
 package akka.mailer
 
+import scala.concurrent.duration._
+import scala.concurrent.duration.Duration
+
 import akka.actor._
 import akka.routing.RoundRobinRouter
-import scala.concurrent.duration.Duration
-import scala.concurrent.duration._
+import Actor._
+
 
 /** Taken from https://github.com/typesafehub/akka-first-tutorial-scala.g8 */
 object Generate extends App {
 
-  getData(nrOfWorkers = 4, nrOfElements = 10000, nrOfMessages = 10000)
+  getData(nrOfWorkers = 4, nrOfElements = 4, nrOfMessages = 4)
 
   sealed trait PiMessage
   case object Calculate extends PiMessage
@@ -17,19 +20,27 @@ object Generate extends App {
   case class Email(text: String, duration: Duration)
 
   class PullData extends Actor {
-
+	var onward : Option[ActorRef]= None
     def genRandomEmail(): String = {
       var str= "blah blah"
       str
     }
 
     def receive = {
+      
       case Work(start, nrOfElements) =>
-        sender ! EmailData(genRandomEmail()) // perform the work
+        println("pullData received Work")
+        val t= context.actorFor("akka://EmailSystem/user/master/applyTemplate")
+        println(t.getClass())
+        println(t.path)
+        t ! EmailData(genRandomEmail()) // perform the work
+      case _ =>
+        println("pullData received unexpected input")
     }
   }
   
   class ApplyTemplate extends Actor {
+	var onward : Option[ActorRef]= None
     
     def applyTemplate(data : String, template : String) : String = {
       return null
@@ -37,12 +48,24 @@ object Generate extends App {
     
     def receive = {
       case Work(start, nrOfElements) =>
-        sender ! EmailData(genRandomEmail()) // perform the work
+        println("ApplyTemplate received Work")
+      case EmailData(text) =>
+        println("ApplyTemplate received EmailData")
+        println(text)
+        /*
+        onward match {
+          case Some(x) => x ! EmailData(genRandomEmail()) // perform the work
+        } 
+        * 
+        */
+      case _ =>
+                println("ApplyTemplate received something else")
+
     }
     
   }
   
-  
+
 
   class Master(nrOfWorkers: Int,
     nrOfMessages: Int,
@@ -52,10 +75,11 @@ object Generate extends App {
     var text: String = _
     var nrOfResults: Int = _
     val start: Long = System.currentTimeMillis
-
+    val myApplyRouter = context.actorOf(Props[ApplyTemplate].withRouter(RoundRobinRouter(nrOfWorkers)), name = "applyTemplate")
+    println(myApplyRouter.path)
     val workerRouter = context.actorOf(
       Props[PullData].withRouter(RoundRobinRouter(nrOfWorkers)), name = "workerRouter")
-
+ 
     def receive = {
       case Calculate =>
         for (i <- 0 until nrOfMessages)
