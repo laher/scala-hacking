@@ -32,9 +32,9 @@ class MailerTests(_system: ActorSystem) extends TestKit(_system) with ImplicitSe
       
       val testPullData = system.actorOf(Props(new Generate.PullData(testProbe.ref)))
       
-      testPullData ! Generate.Work(1,1)
+      testPullData ! Generate.GetRow("nz",1)
       
-      testProbe.expectMsg(Generate.EmailData("blah bl2ah"))
+      testProbe.expectMsg(Generate.EmailData(1, "a@b.c", "Mr Jones"))
       
 //      Generate.getData(nrOfWorkers = 4, nrOfElements = 10000, nrOfMessages = 10000)
   //    Thread.sleep(1000);

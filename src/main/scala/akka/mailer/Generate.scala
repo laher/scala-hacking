@@ -11,113 +11,126 @@ import Actor._
 /** Taken from https://github.com/typesafehub/akka-first-tutorial-scala.g8 */
 object Generate extends App {
 
-  getData(nrOfWorkers = 4, nrOfElements = 4, nrOfMessages = 4)
+  go( nrOfPullDataWorkers=12, nrOfApplyTemplateWorkers=8, nrOfSendEmailWorkers=12, nrOfUpdateDatabaseWorkers=8, 
+      nrOfMessages = 100, template = "To:{to}\n\n Subject:Welcome\n\n Dear {name},\n\nwelcome to Akka\n\nAll the Best")
 
-  sealed trait PiMessage
-  case object Calculate extends PiMessage
-  case class Work(start: Int, nrOfElements: Int) extends PiMessage
-  case class EmailData(value: String) extends PiMessage
-  case class Email(text: String, duration: Duration)
+  case class Query(country: String)
+  case class GetRow(country: String, counter : Long)
+  case class EmailData(id: Long, address: String, name: String)
+  case class RenderedEmail(id: Long, email: String)
+  case class SendResult(id: Long, success : Boolean)
+  
+  case class Report(sent: Integer, failed : Integer, duration: Duration)
 
   class PullData(onward : ActorRef) extends Actor {
-	//var onward : Option[ActorRef]= None
-    def genRandomEmail(): String = {
-      var str= "blah blah"
-      str
+    def genEmail(q : GetRow): EmailData = {
+      Thread.sleep(100)
+      EmailData(q.counter, "a@b.c","Mr Jones")
     }
-
     def receive = {
-      
-      case Work(start, nrOfElements) =>
+      case q : GetRow =>
         println("pullData received Work")
-      //  val t= context.actorFor("akka://EmailSystem/user/master/applyTemplate")
-      //  println(t.getClass())
-      //  println(t.path)
-        onward ! EmailData(genRandomEmail()) // perform the work
-      case _ =>
-        println("pullData received unexpected input")
+        onward ! genEmail(q) // perform the work
+      case x : AnyRef =>
+        println("Warning: pullData received unexpected input", x)
     }
   }
-  
-  class ApplyTemplate extends Actor {
-	//var onward : Option[ActorRef]= None
-    
-    def applyTemplate(data : String, template : String) : String = {
-      return null
-    }
-    
+
+  class ApplyTemplate(onward : ActorRef, template: String) extends Actor {
     def receive = {
-      case Work(start, nrOfElements) =>
-        println("ApplyTemplate received Work")
-      case EmailData(text) =>
+      case EmailData(id, to, name) =>
         println("ApplyTemplate received EmailData")
-        println(text)
-        
-        /*
-        onward match {
-          case Some(x) => x ! EmailData(genRandomEmail()) // perform the work
-        } 
-        * 
-        */
+        Thread.sleep(20)
+        onward ! RenderedEmail(id, template.replace("{name}", name).replace("{to}", to))
       case _ =>
-                println("ApplyTemplate received something else")
-
-    }
-    
+        println("Warning: ApplyTemplate received something else")
+   }
   }
   
-
-
-  class Master(nrOfWorkers: Int,
-    nrOfMessages: Int,
-    nrOfElements: Int,
-    listener: ActorRef) extends Actor {
-
-    var text: String = _
-    var nrOfResults: Int = _
-    val start: Long = System.currentTimeMillis
-    val myApplyRouter = context.actorOf(Props[ApplyTemplate].withRouter(RoundRobinRouter(nrOfWorkers)), name = "applyTemplate")
-    println(myApplyRouter.path)
-    val workerRouter = context.actorOf(
-       Props(new PullData(myApplyRouter)).withRouter(RoundRobinRouter(nrOfWorkers)), name = "workerRouter")
- 
+  class SendEmail(onward : ActorRef) extends Actor {
+    def sendMail(email : RenderedEmail) : SendResult = {
+      Thread.sleep(100)
+      SendResult(email.id, true)
+    }
     def receive = {
-      case Calculate =>
+      case s : RenderedEmail =>
+         println("SendEmail received RenderedMail")
+        onward ! sendMail(s)
+      case _ =>
+        println("Warning: SendEmail received something else")
+    }
+  }
+  
+  class UpdateDatabase(onward : ActorRef) extends Actor {
+    def updateDatabase(s : SendResult) : SendResult = {
+      Thread.sleep(100)
+      s
+    }
+     def receive = {
+      case s : SendResult =>
+        onward ! updateDatabase(s)
+      case _ =>
+        println("Warning: SendEmail received something else")
+    }
+  }
+
+  class Master(nrOfPullDataWorkers: Int,
+    nrOfApplyTemplateWorkers : Int,
+    nrOfSendEmailWorkers: Int,
+    nrOfUpdateDatabaseWorkers: Int,
+    nrOfMessages: Int,
+    template: String) extends Actor {
+	
+    val start: Long = System.currentTimeMillis
+     // create the result listener, which will print the result and
+    // shutdown the system
+    val listener = context.actorOf(Props(new Listener(start, nrOfMessages)), name = "listener")
+    
+    val updateDatabaseRouter = context.actorOf(Props(creator = { () => new UpdateDatabase(listener) }).withRouter(RoundRobinRouter(nrOfUpdateDatabaseWorkers)), name = "updateDatabase")
+    val sendEmailRouter = context.actorOf(Props(creator = { () => new SendEmail(updateDatabaseRouter) }).withRouter(RoundRobinRouter(nrOfSendEmailWorkers)), name = "sendEmail")
+    val applyTemplateRouter = context.actorOf(Props(creator = { () => new ApplyTemplate(sendEmailRouter, template ) }).withRouter(RoundRobinRouter(nrOfApplyTemplateWorkers)), name = "applyTemplate")
+    val pullDataRouter = context.actorOf(Props(creator = { () => new PullData(applyTemplateRouter) }).withRouter(RoundRobinRouter(nrOfPullDataWorkers)), name = "pullDataRouter")
+
+    def receive = {
+      case Query(country) =>
         for (i <- 0 until nrOfMessages)
-          workerRouter ! Work(i * nrOfElements, nrOfElements)
-      case EmailData(value) =>
-        text += value
+          pullDataRouter ! GetRow(country, i)
+    }
+  }
+
+  class Listener(start: Long, nrOfMessages: Int) extends Actor {
+    var nrOfResults: Int = _
+    var failures: Int = _
+    
+    def receive = {
+      case s : SendResult =>
         nrOfResults += 1
+        if(! s.success) {
+          failures += 1
+        }
         if (nrOfResults == nrOfMessages) {
-          listener ! Email(text, duration = (System.currentTimeMillis - start).millis)
+          println("\n\n\tSent: \t\t%d\n\tFailed: \t%s\n\tDuration: %s".format(nrOfResults, failures, (System.currentTimeMillis - start).millis))
+          context.system.shutdown()
           context.stop(self)
         }
+        
     }
   }
 
-  class Listener extends Actor {
-    def receive = {
-      case Email(text, duration) =>
-        println("\n\tPi approximation: \t\t%s\n\tCalculation time: \t%s".format(text, duration))
-        context.system.shutdown()
-    }
-  }
-
-  def getData(nrOfWorkers: Int, nrOfElements: Int, nrOfMessages: Int) {
+  def go(nrOfPullDataWorkers: Int,
+    nrOfApplyTemplateWorkers : Int,
+    nrOfSendEmailWorkers: Int,
+    nrOfUpdateDatabaseWorkers: Int, nrOfMessages: Int, template: String) {
     // Create an Akka system
     val system = ActorSystem("EmailSystem")
 
-    // create the result listener, which will print the result and 
-    // shutdown the system
-    val listener = system.actorOf(Props[Listener], name = "listener")
-
     // create the master
     val master = system.actorOf(Props(new Master(
-      nrOfWorkers, nrOfMessages, nrOfElements, listener)),
+      nrOfPullDataWorkers, nrOfApplyTemplateWorkers, nrOfSendEmailWorkers, nrOfUpdateDatabaseWorkers, nrOfMessages, template)),
       name = "master")
 
     // start the calculation
-    master ! Calculate
+    master ! Query("nz")
 
   }
 }

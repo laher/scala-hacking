@@ -6,7 +6,7 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.duration._
 
 /** Taken from https://github.com/typesafehub/akka-first-tutorial-scala.g8 */
-object Pi extends App {
+object Pi { //}extends App {
 
   calculate(nrOfWorkers = 4, nrOfElements = 10000, nrOfMessages = 10000)
 
